@@ -1,0 +1,48 @@
+name: Publish release
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  pypi-publish:
+    runs-on: ubuntu-latest
+    environment: pypi-release
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: pdm-project/setup-pdm@v3
+    - name: Setup
+      run: |
+        python3 -m pip install pdm-bump
+        pdm sync --dev
+    - name: Build
+      run: pdm build
+    - name: Update git release tag
+      id: tagger
+      run: |
+        git config --global user.name 'Auto'
+        git config --global user.email 'mxndtaylor@users.noreply.github.com'
+        pdm bump tag && git push --tags
+        tag=v$( pdm show --version )
+        tag_is_full_release=$( [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\$ ]] && echo 'TRUE' || echo 'FALSE' )
+        echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+        echo "full-release=${tag_is_full_release}" >> "$GITHUB_OUTPUT"
+    - name: Test and get reports
+      run: pdm reports
+    - uses: "marvinpinto/action-automatic-releases@latest"
+      id: gh-release
+      with:
+        prerelease: ${{ steps.tagger.outputs.full-release == 'FALSE' }}
+        automatic_release_tag: ${{ steps.tagger.outputs.tag }}
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        files: |
+          dist/*
+          badges/*.svg
+    - name: Publish package distributions to PyPI
+      run: |
+        rm dist/reports.tar.gz
+        pdm publish --no-build
